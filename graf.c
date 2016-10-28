@@ -37,6 +37,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 #include <sys/stat.h>
 #include "zlib.h"
 
@@ -191,11 +192,11 @@ local int build_index(FILE *in, off_t span, struct access **built)
                update the total input and output counters */
             totin += strm.avail_in;
             totout += strm.avail_out;
-            
+
             ret = inflate(&strm, Z_BLOCK);      /* return at end of block */
             totin -= strm.avail_in;
             totout -= strm.avail_out;
-            
+
             if (ret == Z_NEED_DICT)
                 ret = Z_DATA_ERROR;
             if (ret == Z_MEM_ERROR || ret == Z_DATA_ERROR)
@@ -400,27 +401,27 @@ int load_index(char* filename, struct access** idx)
 {
 	off_t size = 0;
 	FILE *fh = fopen(filename, "rb");
-	
+
 	if( (!fh) || (fsize(filename) <= 0) )
 	{
 		fprintf(stderr, "graf: invalid or inaccessible index file %s", filename);
 		return 1;
 	}
-	
+
 	size = fsize(filename);
-	
+
 	struct point* list;
 	list = calloc(1, (size - sizeof(size_t)));
-	
+
 	struct access* dest = *idx;
 
 	fread(&dest->usize, sizeof(size_t), 1, fh);
 	fread(list, (size - sizeof(size_t)), 1, fh);
-	
+
 	dest->have = ((size - sizeof(size_t)) / sizeof(struct point));
 	dest->size = dest->have;
 	dest->list = list;
-	
+
 	fclose(fh);
 	return 0;
 }
@@ -440,7 +441,7 @@ void usage(char* progname)
         fprintf(stderr, "    - This uses the index file you generated in step 1 to read the 42 bytes that begin at uncompressed offset 9000.\n");
         fprintf(stderr, "    - This and all subsequent reads will be much faster than having to decompress the whole file up to your desired offset.\n");
         fprintf(stderr, "    - Attempted reads which extend beyond the end of the file and/or begin at non-existent offsets may result in errors...or segfaults.\n\n");
-        
+
         fprintf(stderr, " Quick usage:\n\n");
         fprintf(stderr, "    %s (gzfile) (idxfile) build (spanlength)\n",progname);
         fprintf(stderr, "    %s (gzfile) (idxfile) read (offset) (bytes to read)\n\n",progname);
@@ -454,23 +455,23 @@ int main(int argc, char **argv)
 
 	// build = 5 args
 	// read = 6 args
-	
+
 	if (argc < 5 || argc > 6) {	usage(argv[0]);	return 1; }
 
 	if ( strcmp(argv[3], "build") == 0)
 	{
 		if (argc != 5) { usage(argv[0]); return 1; }
-		
+
 		char *gzfile = argv[1];
 		char *idxfile = argv[2];
-		
+
 		size_t spanlength;
 		sscanf(argv[4], "%zu", &spanlength);
-		
+
 		fprintf(stderr,"Building index %s from gzip file %s with span length %zu\n", idxfile, gzfile, spanlength);
-		
+
 		in = fopen(gzfile, "rb");
-		
+
 		len = build_index(in, spanlength, &index);
 		if (len < 0) {
 			fclose(in);
@@ -500,15 +501,16 @@ int main(int argc, char **argv)
 		char *gzfile = argv[1];
 		char *idxfile = argv[2];
 		struct access *index = malloc(sizeof(*index));
-		
+
 		off_t readoffset;
 		sscanf(argv[4], "%zu", &readoffset);
-			
+
 		size_t readlen;
 		sscanf(argv[5], "%zu", &readlen);
 
 		in = fopen(gzfile, "rb");
-		unsigned char buf[readlen + 1];
+
+		unsigned char *buf = malloc(readlen + 1);
 
 		int load_index_res = load_index(idxfile, &index);
 
@@ -518,17 +520,18 @@ int main(int argc, char **argv)
 			free(index);
 			return 0;
 		}
-		
-		int extract_res = extract(in, index, readoffset, buf, readlen);
-		if(extract_res > 0)
+
+		int bytes_extracted = extract(in, index, readoffset, buf, readlen);
+		if(bytes_extracted > 0)
 		{
-			fwrite(buf, 1, readlen, stdout);
+			fwrite(buf, 1, bytes_extracted, stdout);
 			printf("\n");
 		}
-		
+
 		free_index(index);
+		free(buf);
 		fclose(in);
-				
+
 		return 0;
 	}
 	else
@@ -536,6 +539,6 @@ int main(int argc, char **argv)
 		fprintf(stderr, "Invalid operation: %s\n",argv[3]);
 		return 2;
 	}
-	
+
 	return 3;
 }
