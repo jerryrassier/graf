@@ -138,6 +138,7 @@ local int build_index(FILE *in, off_t span, struct access **built)
     z_stream strm;
     unsigned char input[CHUNK];
     unsigned char window[WINSIZE];
+	int numpoints = 0;
 
 	/* The original code used these memory blocks without zeroing them -
 	 * this led to ~32kB of potentially sensitive 'junk' data being
@@ -218,12 +219,17 @@ local int build_index(FILE *in, off_t span, struct access **built)
             if ((strm.data_type & 128) && !(strm.data_type & 64) && (totout == 0 || totout - last > span))
             {
                 index = addpoint(index, strm.data_type & 7, totin, totout, strm.avail_out, window);
+                if(numpoints % 10 == 0)
+                {
+					fprintf(stderr, ".");
+				}
                 if (index == NULL)
                 {
                     ret = Z_MEM_ERROR;
                     goto build_index_error;
                 }
                 last = totout;
+                numpoints++;
             }
         }
         while (strm.avail_in != 0);
@@ -401,28 +407,37 @@ int load_index(char* filename, struct access** idx)
 {
 	off_t size = 0;
 	FILE *fh = fopen(filename, "rb");
-
+	
 	if( (!fh) || (fsize(filename) <= 0) )
 	{
 		fprintf(stderr, "graf: invalid or inaccessible index file %s", filename);
 		return 1;
 	}
-
+	
 	size = fsize(filename);
-
+	
 	struct point* list;
 	list = calloc(1, (size - sizeof(size_t)));
-
+	
 	struct access* dest = *idx;
 
-	fread(&dest->usize, sizeof(size_t), 1, fh);
-	fread(list, (size - sizeof(size_t)), 1, fh);
+	size_t readcount = 0;
 
+	readcount += fread(&dest->usize, sizeof(size_t), 1, fh);
+	readcount += fread(list, (size - sizeof(size_t)), 1, fh);
+	
+	fclose(fh);
+	
+	if(readcount != 2)
+	{
+		fprintf(stderr, "graf: strange number of read operations (%zu) against index file.\n",readcount);
+		return 2;
+	}
+	
 	dest->have = ((size - sizeof(size_t)) / sizeof(struct point));
 	dest->size = dest->have;
 	dest->list = list;
 
-	fclose(fh);
 	return 0;
 }
 
@@ -468,7 +483,7 @@ int main(int argc, char **argv)
 		size_t spanlength;
 		sscanf(argv[4], "%zu", &spanlength);
 
-		fprintf(stderr,"Building index %s from gzip file %s with span length %zu\n", idxfile, gzfile, spanlength);
+		fprintf(stderr,"Building index %s from gzip file %s with span length %zu.\nOne '.' = 10 index points built:\n", idxfile, gzfile, spanlength);
 
 		in = fopen(gzfile, "rb");
 
@@ -491,7 +506,7 @@ int main(int argc, char **argv)
 			return 1;
 		}
 		write_index(index, idxfile);
-		fprintf(stderr,"Wrote index %s with %d access points - index size is %zu bytes\n", idxfile, len, fsize(idxfile));
+		fprintf(stderr,"\nWrote index %s with %d access points - index size is %zu bytes\n", idxfile, len, fsize(idxfile));
 		fclose(in);
 		return 0;
 	}
